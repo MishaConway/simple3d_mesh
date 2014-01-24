@@ -1,0 +1,5 @@
+require 'wavefront'
+require 'geo3d'
+require 'simple3d/version'
+require 'simple3d/mesh'
+require 'simple3d/vertex'

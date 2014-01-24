@@ -17,19 +17,37 @@ module Simple3d
       @vertices ||= []
     end
 
-    def add_face points, reuse_existing_points = false
-      points.each do |pt|
-        pt = Simple::Vertex.new *pt if pt.kind_of? Array
-        similar_vertex_index = if reuse_existing_points
-                                 find_similar_vertex pt
-                               else
-                                 nil
-                               end
-        if similar_vertex_index
-          @indices << similar_vertex_index
-        else
-          @vertices << pt
-          @indices << @vertices.size - 1
+    def self.from_file filename
+      m = self.new
+
+      w = Wavefront::File.new filename
+      w.compute_vertex_buffer.each_slice(3) do |slice|
+        m.add_face slice.map{|wv| wv.position.to_a + [wv.tex.x, wv.tex.y] + wv.normal.to_a }
+      end
+
+      m
+    end
+
+    def add_face points, reuse_existing_points = true
+      if points.size > 4
+        raise "faces with more than four points currently not supported"
+      elsif points.size == 4
+        add_face [points[0], points[1], points[3]]
+        add_face [points[3], points[1], points[2]]
+      else
+        points.each do |pt|
+          pt = Vertex.new *pt if pt.kind_of? Array
+          similar_vertex_index = if reuse_existing_points
+                                   find_similar_vertex pt
+                                 else
+                                   nil
+                                 end
+          if similar_vertex_index
+            @indices << similar_vertex_index
+          else
+            @vertices << pt
+            @indices << @vertices.size - 1
+          end
         end
       end
     end
@@ -52,6 +70,28 @@ module Simple3d
 
     end
 
+    def num_triangles
+      indices.size / 3
+    end
+
+    def renderable_vertices
+      indices.map do |i|
+        vertices[i]
+      end
+    end
+
+    def indices_for_triangle i
+      [indices[i*3], indices[i*3+1], indices[i*3+2]]
+    end
+
+    def vertices_for_triangle i
+      indices_for_triangle(i).map { |index| vertices[index] }
+    end
+
+    def triangle i
+      Geo3d::Triangle.new *(vertices_for_triangle(i).map(&:position))
+    end
+
 
     def smooth_normals!
       indices_to_face_normals = Array.new vertices.size
@@ -60,15 +100,16 @@ module Simple3d
       end
 
       for a in 0..num_triangles-1
+        tri = triangle a
         indices_for_triangle(a).each do |vertex_index|
-          face_normal = Geo3d::Triangle.new(*indices_for_triangle(i).map { |index| vertices[index].position }).normal
+          face_normal = tri.normal
           indices_to_face_normals[vertex_index] << face_normal
         end
       end
 
       for i in 0..vertices.size-1
         face_normals = indices_to_face_normals[i]
-        vertices[i].normal = face_normals.inject(:+) / face_normals.size.to_f
+        vertices[i].normal = face_normals.inject(:+).normalize
       end
     end
 
@@ -83,13 +124,13 @@ module Simple3d
       for a in 0..num_triangles-1
         i1, i2, i3 = indices_for_triangle a
 
-        v1 = position i1
-        v2 = position i2
-        v3 = position i3
+        v1 = vertices[i1].position
+        v2 = vertices[i2].position
+        v3 = vertices[i3].position
 
-        w1 = texcoord i1
-        w2 = texcoord i2
-        w3 = texcoord i3
+        w1 = vertices[i1].texcoord
+        w2 = vertices[i2].texcoord
+        w3 = vertices[i3].texcoord
 
         x1 = v2.x - v1.x
         x2 = v3.x - v1.x
@@ -118,8 +159,11 @@ module Simple3d
 
       for a in 0..vertices.size-1
 
-        n = normals a
+        n = vertices[a].normal
         t = tan1[a]
+
+        puts "n is #{n.inspect}"
+        puts "t is #{t.inspect}"
 
         # Gram-Schmidt orthogonalize
         vertices[a].tangent = (t - n * n.dot(t)).normalize
@@ -140,11 +184,7 @@ module Simple3d
       cube.add_face [[-1, -1, 1], [-1, 1, 1], [-1, 1, -1], [-1, -1, -1]]
       cube.add_face [[1, 1, -1], [1, -1, -1], [-1, -1, -1], [-1, 1, -1]]
       cube
-
-
     end
 
   end
-
-
 end
